@@ -19,3 +19,4 @@ Atualizações e registros compartilhados entre membros do grupo.
 
 ### 
 **Projeto desenvolvido para a disciplina de NoSQL, utilizando banco de dados não relacional para armazenar dados de usuários, refeições, grupos e interações sociais.**
+**Banco de dados → documentação e modelagem do banco MongoDB**
