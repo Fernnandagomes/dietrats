@@ -34,9 +34,7 @@ Responsável por armazenar as informações de cada usuário cadastrado.
 | grupo_id | Grupo ao qual o usuário pertence |
 | data_criacao | Data de criação da conta |
 
-> *(Inserir print da coleção usuarios)*
-
----
+![Coleção usuarios](../img/usuarios.png)---
 
 # Coleção: grupos
 
@@ -51,7 +49,7 @@ Armazena os grupos criados pelos usuários para participação em rankings e des
 - participantes
 - data_criacao
 
-> *(Inserir print da coleção grupos)*
+![Coleção usuarios](../img/grupos.png)---
 
 ---
 
@@ -73,7 +71,7 @@ Cada documento corresponde a uma refeição considerada saudável.
 
 Essa coleção é a principal do sistema, pois registra as conquistas que alimentam o ranking.
 
-> *(Inserir print da coleção registrosdiarios)*
+![Coleção usuarios](../img/registrosdiarios.png)---
 
 ---
 
@@ -88,7 +86,7 @@ Permite que usuários interajam com os registros publicados.
 - comentario
 - data
 
-> *(Inserir print da coleção comentarios)*
+![Coleção usuarios](../img/comentarios.png)---
 
 ---
 
@@ -105,7 +103,8 @@ As reações funcionam como incentivo entre os participantes.
 - emoji
 - data
 
-> *(Inserir print da coleção reacoes)*
+![Coleção reacoes](../img/usuarios.png)---
+
 
 ---
 
@@ -128,7 +127,8 @@ Exemplos:
 - lida
 - data
 
-> *(Inserir print da coleção notificacoes)*
+![Coleção usuarios](../img/notificacoes.png)---
+*
 
 ---
 
