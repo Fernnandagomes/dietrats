@@ -329,27 +329,22 @@ def img_to_base64(image):
 def base64_to_bytes(b64_str):
     return base64.b64decode(b64_str)
 
-# --- mongo configuration in sidebar ---
-st.sidebar.markdown("<h2 style='color:#22C55E; font-weight:800; margin-top:0;'>🧬 CONFIG DIETRATS</h2>", unsafe_allow_html=True)
-
-default_uri = os.environ.get("MONGO_URI", "mongodb://localhost:27017/")
+# --- mongo configuration (automatic — reads from st.secrets or environment) ---
+mongo_uri = None
 try:
     if "MONGO_URI" in st.secrets:
-        default_uri = st.secrets["MONGO_URI"]
+        mongo_uri = st.secrets["MONGO_URI"]
 except Exception:
     pass
 
-mongo_uri_input = st.sidebar.text_input(
-    "String de Conexão MongoDB Atlas",
-    value=default_uri,
-    type="password"
-)
+if not mongo_uri:
+    mongo_uri = os.environ.get("MONGO_URI", "")
 
-db = database.get_db(mongo_uri_input)
+db = database.get_db(mongo_uri)
 
 if db is None:
-    st.warning("Aguardando conexão válida com o banco de dados...")
-    st.info("Dica: Insira sua String de Conexão do MongoDB Atlas no campo da barra lateral para conectar.")
+    st.error("❌ Não foi possível conectar ao banco de dados.")
+    st.info("Configure a variável **MONGO_URI** nos Secrets do Streamlit Cloud (Settings → Secrets).")
     st.stop()
 
 # --- auth system state ---
