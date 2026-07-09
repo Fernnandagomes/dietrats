@@ -1,6 +1,7 @@
 # DietRats
+
+https://dietrats.streamlit.app/
 DietRats
-Projeto desenvolvido para a disciplina de NoSQL, utilizando banco de dados não relacional para armazenar dados de usuários, refeições, grupos e interações sociais.
 
 **DietRats** é uma rede social fitness voltada para consistência alimentar em grupo. Construído com **Streamlit**, **Python** e **MongoDB (PyMongo)**, o projeto permite que usuários postem suas refeições diárias, reajam com emojis, comentem e acompanhem um ranking de consistência dentro do próprio grupo.
 A plataforma combina acompanhamento alimentar com competição entre amigos, incentivando os usuários a manterem consistência com hábitos saudáveis.
