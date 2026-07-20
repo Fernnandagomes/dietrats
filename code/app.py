@@ -652,48 +652,48 @@ with tabs[0]:
                 
                 st.markdown("<div style='margin-top:15px;'></div>", unsafe_allow_html=True)
                 
-                # Fetch Reactions
-                reactions_list = list(db["reacoes"].find({"registro_id": meal["_id"]}))
+                # Reações — lidas diretamente do array embutido no documento
+                reacoes_embutidas = meal.get("reacoes", [])
                 react_counts = {}
-                for r in reactions_list:
+                for r in reacoes_embutidas:
                     react_counts[r["tipo"]] = react_counts.get(r["tipo"], 0) + 1
-                
+
                 react_cols = st.columns(6)
                 emojis = ["💪", "🔥", "🥗", "❤️", "🍗", "😮"]
-                
+
                 for e_idx, emoji in enumerate(emojis):
                     count = react_counts.get(emoji, 0)
                     btn_label = f"{emoji} {count}"
                     if react_cols[e_idx].button(btn_label, key=f"react_{meal['_id']}_{emoji}_{idx}"):
                         database.toggle_reaction(
-                            db, meal["_id"], current_user["_id"], emoji, meal["usuario_id"], meal["tipo"], current_user["nome"]
+                            db, meal["_id"], current_user["_id"], emoji, current_user["nome"]
                         )
                         st.rerun()
-                
-                # Fetch Comments
-                comments_list = list(db["comentarios"].find({"registro_id": meal["_id"]}).sort("data_criacao", 1))
+
+                # Comentários — lidos diretamente do array embutido no documento
+                comments_list = meal.get("comentarios", [])
                 if comments_list:
                     st.markdown("<div style='background-color:#110E26; padding:12px 18px; border-radius:10px; margin-top:14px; border:1px solid #2A264D;'>", unsafe_allow_html=True)
                     st.markdown("<strong style='font-size:0.9em; color:#22C55E;'>Comentários:</strong>", unsafe_allow_html=True)
                     for c in comments_list:
-                        c_user = db["usuarios"].find_one({"_id": c["usuario_id"]}, {"nome": 1, "avatar": 1, "foto_url": 1})
-                        if c_user:
-                            c_avatar_html = ""
-                            if c_user.get("foto_url"):
-                                c_avatar_html = f"<img style='width:24px; height:24px; border-radius:50%; object-fit:cover; display:inline-block; vertical-align:middle; margin-right:6px;' src='data:image/png;base64,{c_user['foto_url']}'>"
-                            else:
-                                c_avatar_html = f"<span style='font-size: 1.1em; margin-right:6px; vertical-align:middle;'>{c_user['avatar']}</span>"
-                                
-                            st.markdown(f"<div style='margin-bottom:8px; font-size:0.93em; color:#F3F4F6;'>{c_avatar_html} <strong>{c_user['nome']}:</strong> <span style='color:#9CA3AF;'>{c['texto']}</span></div>", unsafe_allow_html=True)
+                        c_nome   = c.get("nome", "Atleta")
+                        c_avatar = ""
+                        # Busca avatar apenas para renderização — dado já existe no comentário
+                        c_user = db["usuarios"].find_one({"_id": c["usuario_id"]}, {"avatar": 1, "foto_url": 1})
+                        if c_user and c_user.get("foto_url"):
+                            c_avatar = f"<img style='width:24px; height:24px; border-radius:50%; object-fit:cover; display:inline-block; vertical-align:middle; margin-right:6px;' src='data:image/png;base64,{c_user['foto_url']}'>"
+                        elif c_user:
+                            c_avatar = f"<span style='font-size:1.1em; margin-right:6px; vertical-align:middle;'>{c_user['avatar']}</span>"
+                        st.markdown(f"<div style='margin-bottom:8px; font-size:0.93em; color:#F3F4F6;'>{c_avatar} <strong>{c_nome}:</strong> <span style='color:#9CA3AF;'>{c['texto']}</span></div>", unsafe_allow_html=True)
                     st.markdown("</div>", unsafe_allow_html=True)
-                
-                # Add Comment form
+
+                # Formulário para adicionar comentário
                 with st.form(key=f"comment_form_{meal['_id']}_{idx}"):
                     comment_text = st.text_input("Escreva um comentário...", label_visibility="collapsed")
                     c_submit = st.form_submit_button("Comentar")
                     if c_submit and comment_text.strip():
                         database.add_comment(
-                            db, meal["_id"], current_user["_id"], comment_text.strip(), meal["usuario_id"], current_user["nome"]
+                            db, meal["_id"], current_user["_id"], comment_text.strip(), current_user["nome"]
                         )
                         st.success("Comentário adicionado!")
                         st.rerun()
@@ -741,21 +741,21 @@ with tabs[1]:
 # --- TAB 3: RANKING DOS ATLETAS ---
 with tabs[2]:
     st.subheader("Ranking de Consistência do Grupo 🏆")
-    
+
     if not user_group:
         st.info("Entre ou crie um grupo na barra lateral para ver o ranking dos atletas.")
     else:
         ranking_users = database.get_ranking(db, user_group["_id"])
-        
+
         for pos, u in enumerate(ranking_users, 1):
             medal = "🥇" if pos == 1 else "🥈" if pos == 2 else "🥉" if pos == 3 else "🏃"
-            
+
             u_avatar_html = ""
             if u.get("foto_url"):
                 u_avatar_html = f"<img style='width:56px; height:56px; border-radius:50%; object-fit:cover; border:2px solid #22C55E;' src='data:image/png;base64,{u['foto_url']}'>"
             else:
                 u_avatar_html = f"<span style='font-size: 1.7em; background-color: #2A264D; width:56px; height:56px; border-radius:50%; display:flex; align-items:center; justify-content:center; border: 2px solid #22C55E;'>{u['avatar']}</span>"
-                
+
             st.markdown(f"""
             <div class="ranking-card" style="background-color:#1C1936; border:1px solid #2A264D; border-left:6px solid #22C55E;">
                 <div style="display: flex; align-items: center; gap: 18px;">
@@ -773,31 +773,112 @@ with tabs[2]:
             </div>
             """, unsafe_allow_html=True)
 
+    # ── Hall da Fama — Top 5 do App Inteiro ──────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #1C1936 0%, #2A1A4A 100%);
+                border: 1px solid #6D28D9; border-radius: 20px; padding: 28px;
+                margin-top: 10px; box-shadow: 0 0 30px rgba(109,40,217,0.25);'>
+        <div style='text-align:center; margin-bottom: 20px;'>
+            <div style='font-size:2.5em;'>🌟</div>
+            <h2 style='color:#F3F4F6; font-size:1.7em; font-weight:900; margin:6px 0 4px;'>Hall da Fama</h2>
+            <p style='color:#9CA3AF; font-size:1em; margin:0;'>Os 5 atletas mais dedicados do DietRats</p>
+            <div style='width:60px; height:3px; background:#22C55E; margin:12px auto 0;'></div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    hall = database.get_hall_da_fama(db)
+
+    if not hall:
+        st.info("Ainda não há registros suficientes para o Hall da Fama.")
+    else:
+        crowns = ["👑", "🥈", "🥉", "4️⃣", "5️⃣"]
+        border_colors = ["#F59E0B", "#94A3B8", "#CD7F32", "#2A264D", "#2A264D"]
+        glow_colors  = ["rgba(245,158,11,0.3)", "rgba(148,163,184,0.2)",
+                        "rgba(205,127,50,0.2)", "rgba(0,0,0,0)", "rgba(0,0,0,0)"]
+
+        for pos, h in enumerate(hall, 1):
+            crown = crowns[pos - 1]
+            bc    = border_colors[pos - 1]
+            gc    = glow_colors[pos - 1]
+
+            if h.get("foto_url"):
+                h_avatar = f"<img style='width:60px; height:60px; border-radius:50%; object-fit:cover; border:3px solid {bc};' src='data:image/png;base64,{h['foto_url']}'>"
+            else:
+                h_avatar = f"<span style='font-size:1.9em; background-color:#2A264D; width:60px; height:60px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:3px solid {bc};'>{h['avatar']}</span>"
+
+            st.markdown(f"""
+            <div style='display:flex; align-items:center; justify-content:space-between;
+                        background-color:#1C1936; padding:18px 24px; border-radius:16px;
+                        margin-bottom:12px; border:1px solid {bc};
+                        box-shadow: 0 0 18px {gc};'>
+                <div style='display:flex; align-items:center; gap:16px;'>
+                    <span style='font-size:2em; min-width:40px; text-align:center;'>{crown}</span>
+                    {h_avatar}
+                    <div>
+                        <div style='font-weight:800; color:#F3F4F6; font-size:1.25em;'>{h['nome']}</div>
+                        <div style='font-size:0.9em; color:#9CA3AF; margin-top:3px;'>🏠 {h.get('grupo_nome','Sem Grupo')}</div>
+                        <div style='font-size:0.85em; color:#6D28D9; margin-top:2px; font-weight:700;'>🔥 {h.get('streak_atual',0)} dias de streak</div>
+                    </div>
+                </div>
+                <div style='text-align:right; min-width:90px;'>
+                    <span style='font-size:2em; font-weight:900; color:{bc}; display:block;'>{h.get('total_refeicoes',0)}</span>
+                    <div style='font-size:0.78em; color:#9CA3AF; font-weight:700; text-transform:uppercase;'>refeições</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("""
+        <div style='margin-top:20px; background:linear-gradient(135deg,#15803D,#22C55E);
+                    border-radius:14px; padding:20px 24px; text-align:center;
+                    box-shadow: 0 4px 20px rgba(34,197,94,0.25);'>
+            <div style='font-size:1.6em; margin-bottom:6px;'>🎁</div>
+            <div style='color:#fff; font-size:1.1em; font-weight:800; margin-bottom:4px;'>Parabéns aos campeões!</div>
+            <div style='color:rgba(255,255,255,0.85); font-size:0.95em;'>
+                Os atletas no Top 5 serão reconhecidos pela comunidade DietRats.
+                Continue registrando suas refeições e mantenha o foco! 💪
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
 # --- TAB 4: NOTIFICAÇÕES ---
 with tabs[3]:
     st.subheader("Suas Notificações 🔔")
-    
+
     notifications = database.get_notifications(db, current_user["_id"])
-    
+
     if not notifications:
-        st.info("Nenhuma notificação por aqui no momento!")
+        st.info("Nenhuma notificação por aqui no momento. Quando alguém reagir ou comentar nas suas postagens, aparecerá aqui! 💬")
     else:
-        if st.button("Marcar todas como lidas"):
-            database.mark_notifications_read(db, current_user["_id"])
-            st.success("Notificações marcadas como lidas!")
-            st.rerun()
-            
+        col_n1, col_n2 = st.columns([3, 1])
+        with col_n2:
+            if st.button("✅ Marcar como lidas", use_container_width=True):
+                database.mark_notifications_read(db, current_user["_id"])
+                st.success("Marcadas como lidas!")
+                st.rerun()
+
+        novas   = sum(1 for n in notifications if n.get("is_nova"))
+        with col_n1:
+            if novas:
+                st.markdown(f"<span style='color:#22C55E; font-weight:700;'>🟢 {novas} nova(s) interação(ões) nos seus posts</span>", unsafe_allow_html=True)
+
         for n in notifications:
-            badge = "🟢 Nova" if not n.get("lida") else "⚪ Lida"
-            bg_color = "#1C1936" if not n.get("lida") else "#15132a"
-            border_color = "#22C55E" if not n.get("lida") else "#2A264D"
-            
+            is_nova      = n.get("is_nova", False)
+            badge        = "🟢 Nova" if is_nova else "⚪ Vista"
+            bg_color     = "#1C1936" if is_nova else "#15132a"
+            border_color = "#22C55E" if is_nova else "#2A264D"
+            emoji        = n.get("emoji", "🔔")
+            data_fmt     = n["data"].strftime("%d/%m/%Y %H:%M") if n.get("data") else ""
+
             st.markdown(f"""
-            <div style="background-color: {bg_color}; border: 1px solid {border_color}; padding: 14px 20px; border-radius: 12px; margin-bottom: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                    <span style="font-size: 0.8em; font-weight: 700; color: #22C55E; text-transform: uppercase;">{badge}</span>
-                    <span style="font-size: 0.75em; color: #9CA3AF;">{n['data_criacao'].strftime('%d/%m/%Y %H:%M')}</span>
+            <div style="background-color:{bg_color}; border:1px solid {border_color};
+                        padding:14px 20px; border-radius:12px; margin-bottom:12px;
+                        box-shadow: 0 4px 10px rgba(0,0,0,0.15);">
+                <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                    <span style="font-size:0.8em; font-weight:700; color:#22C55E; text-transform:uppercase;">{badge}</span>
+                    <span style="font-size:0.75em; color:#9CA3AF;">{data_fmt}</span>
                 </div>
-                <div style="font-size: 0.98em; color: #F3F4F6;">{n['texto']}</div>
+                <div style="font-size:1em; color:#F3F4F6;">{emoji} {n['texto']}</div>
             </div>
             """, unsafe_allow_html=True)
