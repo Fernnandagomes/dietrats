@@ -9,6 +9,7 @@ from bson import ObjectId
 
 # Import MongoDB helper functions
 import database
+import cache
 
 # --- page config ---
 st.set_page_config(
@@ -342,6 +343,9 @@ if not mongo_uri:
 
 db = database.get_db(mongo_uri)
 
+# Inicializa Redis (fallback silencioso se indisponivel)
+redis_client = cache.get_redis()
+
 if db is None:
     st.error("❌ Não foi possível conectar ao banco de dados.")
     st.info("Configure a variável **MONGO_URI** nos Secrets do Streamlit Cloud (Settings → Secrets).")
@@ -605,7 +609,7 @@ with tabs[0]:
     if not user_group:
         st.info("Entre em um grupo existente ou crie o seu na barra lateral para ver o feed de postagens!")
     else:
-        meals = database.get_group_feed(db, user_group["_id"])
+        meals = database.get_group_feed(db, user_group["_id"], redis=redis_client)
         
         if not meals:
             st.info("Ainda não há postagens neste grupo. Registre sua primeira refeição para começar!")
@@ -733,6 +737,7 @@ with tabs[1]:
                         )
                         
                         st.success(f"Refeição registrada com sucesso! Você ganhou +10 pontos. Streak atual: {new_streak} dias 🔥")
+                        cache.invalidar_feed_grupo(redis_client, user_group["_id"])
                         st.session_state["tab_key"] = f"tabs_v{datetime.datetime.now().timestamp()}"
                         st.rerun()
                     except Exception as e:
@@ -788,7 +793,7 @@ with tabs[2]:
     </div>
     """, unsafe_allow_html=True)
 
-    hall = database.get_hall_da_fama(db)
+    hall = database.get_hall_da_fama(db, redis=redis_client)
 
     if not hall:
         st.info("Ainda não há registros suficientes para o Hall da Fama.")

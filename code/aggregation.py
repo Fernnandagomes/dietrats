@@ -1,25 +1,39 @@
-﻿"""
+"""
 aggregation.py
 ==============
 Todos os pipelines de aggregation do MongoDB para o DietRats.
 
 Pipelines disponíveis:
-  1. get_feed_com_interacoes  - Feed do grupo com reacoes e comentarios embutidos
+  1. get_feed_com_interacoes   - Feed do grupo com reacoes e comentarios embutidos
   2. get_notificacoes_pipeline - Notificacoes em tempo real via aggregation
-  3. get_hall_da_fama         - Top 5 atletas mais consistentes do app inteiro
+  3. get_hall_da_fama          - Top 5 atletas mais consistentes do app inteiro
+
+Cache:
+  Pipelines 1 e 3 usam Redis Cloud como cache (Cache-Aside pattern).
+  Se o Redis estiver indisponivel, buscam diretamente no MongoDB.
 """
 
 import datetime
+import cache
 from bson import ObjectId
 
 
 # PIPELINE 1 - Feed do Grupo com Interacoes Embutidas
 
-def get_feed_com_interacoes(db, grupo_id):
+def get_feed_com_interacoes(db, grupo_id, redis=None):
     """
-    Retorna os registros diarios do grupo enriquecidos com dados do autor
-    (nome, avatar, foto_url), ja com reacoes[] e comentarios[] embutidos.
+    Retorna os registros diarios do grupo enriquecidos com dados do autor.
+    Usa Redis como cache por 30 segundos por grupo (cache miss -> MongoDB).
     """
+    key = f"feed:grupo:{grupo_id}"
+    return cache.get_cached(
+        redis, key, ttl_segundos=30,
+        fn_busca=lambda: _query_feed(db, grupo_id)
+    )
+
+
+def _query_feed(db, grupo_id):
+    """Query MongoDB diretamente — chamada apenas em cache miss."""
     group_user_ids = [
         u["_id"]
         for u in db["usuarios"].find({"grupo_id": ObjectId(grupo_id)}, {"_id": 1})
@@ -135,11 +149,19 @@ def get_notificacoes_pipeline(db, usuario_id, ultimo_acesso=None):
 
 # PIPELINE 3 - Hall da Fama (Top 5 do App Inteiro)
 
-def get_hall_da_fama(db):
+def get_hall_da_fama(db, redis=None):
     """
-    Retorna os 5 usuarios com maior numero total de refeicoes registradas
-    em todo o aplicativo (nao limitado a um grupo).
+    Retorna os 5 usuarios com maior numero total de refeicoes.
+    Usa Redis como cache por 10 minutos (muda raramente).
     """
+    return cache.get_cached(
+        redis, "hall_da_fama", ttl_segundos=600,
+        fn_busca=lambda: _query_hall(db)
+    )
+
+
+def _query_hall(db):
+    """Query MongoDB diretamente — chamada apenas em cache miss."""
     pipeline = [
         {"$group": {
             "_id":             "$usuario_id",

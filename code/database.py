@@ -89,13 +89,12 @@ def join_group(db, usuario_id, codigo_acesso):
     return grp
 
 
-def get_group_feed(db, grupo_id):
+def get_group_feed(db, grupo_id, redis=None):
     """
     Fetches all meal posts from the group using the aggregation pipeline.
-    Each meal already contains embedded 'reacoes' and 'comentarios' arrays,
-    plus joined 'autor' data (nome, avatar, foto_url).
+    Passes redis connection for Cache-Aside caching (30s TTL per group).
     """
-    return aggregation.get_feed_com_interacoes(db, grupo_id)
+    return aggregation.get_feed_com_interacoes(db, grupo_id, redis=redis)
 
 
 def add_meal(db, usuario_id, tipo, descricao, legenda, foto_b64, data_str):
@@ -209,12 +208,12 @@ def get_ranking(db, grupo_id):
     ]))
 
 
-def get_hall_da_fama(db):
+def get_hall_da_fama(db, redis=None):
     """
     Returns the top 5 users with the most meal registrations across the entire app.
-    Delegates to the aggregation pipeline.
+    Passes redis connection for Cache-Aside caching (10 min TTL).
     """
-    return aggregation.get_hall_da_fama(db)
+    return aggregation.get_hall_da_fama(db, redis=redis)
 
 
 def get_notifications(db, usuario_id):
