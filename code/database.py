@@ -43,11 +43,13 @@ def create_user(db, nome, email, senha, avatar, grupo_id=None, foto_b64=None):
 def update_user(db, usuario_id, nome, email, senha, avatar, foto_b64=None):
     """Updates an existing user's profile details."""
     update_data = {
-        "nome": nome.strip(),
-        "email": email.strip().lower(),
-        "senha": senha,
+        "nome":   nome.strip(),
+        "email":  email.strip().lower(),
         "avatar": avatar,
     }
+    # So atualiza senha se uma nova for fornecida
+    if senha and senha.strip():
+        update_data["senha"] = senha.strip()
     if foto_b64:
         update_data["foto_url"] = foto_b64
 

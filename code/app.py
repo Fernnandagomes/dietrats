@@ -533,7 +533,7 @@ with st.sidebar.expander("⚙️ Editar Perfil"):
     with st.form("edit_profile_form"):
         new_nome = st.text_input("Nome", value=current_user["nome"])
         new_email = st.text_input("E-mail", value=current_user["email"])
-        new_senha = st.text_input("Senha", value=current_user["senha"], type="password")
+        new_senha = st.text_input("Nova Senha (deixe em branco para manter a atual)", value="", type="password")
         new_avatar = st.selectbox("Emoji Avatar", ["💪", "🍗", "🥗", "🏃", "🥦", "🍎", "🔥"], index=["💪", "🍗", "🥗", "🏃", "🥦", "🍎", "🔥"].index(current_user["avatar"]))
         new_photo = st.file_uploader("Alterar Foto de Perfil", type=["jpg", "jpeg", "png"])
         
