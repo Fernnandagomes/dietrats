@@ -1,4 +1,4 @@
-﻿"""
+"""
 cache.py
 ========
 Camada de cache usando Redis Cloud (redis-py).
@@ -30,7 +30,6 @@ def get_redis():
             decode_responses=True,
             socket_connect_timeout=2,
             socket_timeout=2,
-            ssl=True,
         )
         r.ping()
         return r
