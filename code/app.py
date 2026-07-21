@@ -7,9 +7,8 @@ from PIL import Image
 from io import BytesIO
 from bson import ObjectId
 
-# Import MongoDB helper functions
 import database
-import cache
+import redis_cache
 
 # --- page config ---
 st.set_page_config(
@@ -344,7 +343,7 @@ if not mongo_uri:
 db = database.get_db(mongo_uri)
 
 # Inicializa Redis (fallback silencioso se indisponivel)
-redis_client = cache.get_redis()
+redis_client = redis_cache.get_redis()
 
 if db is None:
     st.error("❌ Não foi possível conectar ao banco de dados.")
@@ -757,7 +756,7 @@ with tabs[2]:
         st.info("Entre ou crie um grupo na barra lateral para ver o ranking dos atletas.")
     else:
         # Busca Estatísticas do Grupo calculadas no Redis (ZSET + HyperLogLog)
-        stats_redis = cache.get_estatisticas_refeicoes_grupo(redis_client, user_group["_id"])
+        stats_redis = redis_cache.get_estatisticas_refeicoes_grupo(redis_client, user_group["_id"])
         
         st.markdown(f"""
         <div style='background: linear-gradient(135deg, #1C1936 0%, #2A264D 100%);

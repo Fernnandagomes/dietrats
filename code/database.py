@@ -1,6 +1,6 @@
 import datetime
 import aggregation
-import cache
+import redis_cache
 from pymongo import MongoClient
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
@@ -149,8 +149,8 @@ def add_meal(db, usuario_id, tipo, descricao, legenda, foto_b64, data_str, redis
 
     if user.get("grupo_id"):
         new_pontos = user.get("pontos_consistencia", 0) + 10
-        cache.atualizar_pontos_zset(redis, user["grupo_id"], user["nome"], new_pontos)
-        cache.registrar_tipo_refeicao(redis, user["grupo_id"], tipo, descricao)
+        redis_cache.atualizar_pontos_zset(redis, user["grupo_id"], user["nome"], new_pontos)
+        redis_cache.registrar_tipo_refeicao(redis, user["grupo_id"], tipo, descricao)
 
     return new_streak
 

@@ -1,4 +1,4 @@
-import cache
+import redis_cache
 from bson import ObjectId
 
 
@@ -115,7 +115,7 @@ def get_notificacoes_pipeline(db, usuario_id, ultimo_acesso=None):
 
 def get_hall_da_fama(db, redis=None):
     """Retorna os 5 usuários com maior número de refeições (com cache Redis de 10 min)."""
-    return cache.get_cached(
+    return redis_cache.get_cached(
         redis, "hall_da_fama", ttl_seconds=600,
         fetch_fn=lambda: _query_hall(db)
     )
