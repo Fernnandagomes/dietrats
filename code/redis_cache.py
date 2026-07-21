@@ -96,37 +96,53 @@ def registrar_tipo_refeicao(redis_client, grupo_id, tipo_refeicao, descricao):
         redis_client.expire(key_freq, 2592000)
 
         if descricao:
-            key_hll = f"hll:variedade:grupo:{grupo_id}"
+            # Filtra ingredientes
             words = re.findall(r'\b[a-zA-ZáàâãéèêíóòôõúçÁÀÂÃÉÈÊÍÓÒÔÕÚÇ]+\b', descricao.lower())
             ingredients = [w for w in words if len(w) > 2 and w not in STOPWORDS]
             if ingredients:
+                # 1. Adiciona ao HLL de variedade unica
+                key_hll = f"hll:variedade:grupo:{grupo_id}"
                 redis_client.pfadd(key_hll, *ingredients)
                 redis_client.expire(key_hll, 2592000)
+
+                # 2. Adiciona ao ZSET de frequencia de ingredientes do grupo
+                key_ing_zset = f"zset:ingredientes:grupo:{grupo_id}"
+                for ing in ingredients:
+                    redis_client.zincrby(key_ing_zset, 1, ing)
+                redis_client.expire(key_ing_zset, 2592000)
     except Exception:
         pass
 
 
 def get_estatisticas_refeicoes_grupo(redis_client, grupo_id):
-    """Retorna o tipo de refeição mais frequente (ZSET) e estimativa de ingredientes únicos (HLL)."""
-    default_stats = {"mais_frequente": "Nenhum registro", "variedade_hll": 0}
+    """Retorna o tipo de refeição mais frequente, estimativa de ingredientes únicos e top 3 ingredientes."""
+    default_stats = {"mais_frequente": "Nenhum registro", "variedade_hll": 0, "top_3_ingredientes": "Nenhum"}
     if not redis_client or not grupo_id:
         return default_stats
     try:
+        # Tipo mais frequente
         key_freq = f"freq:refeicoes:grupo:{grupo_id}"
         top_meal = redis_client.zrevrange(key_freq, 0, 0, withscores=True)
-
         most_frequent = "Nenhum registro"
         if top_meal:
             name, count = top_meal[0]
             most_frequent = f"{name} ({int(count)}x)"
 
+        # Ingredientes únicos
         key_hll = f"hll:variedade:grupo:{grupo_id}"
         variety_count = redis_client.pfcount(key_hll)
 
+        # Top 3 ingredientes mais comuns
+        key_ing_zset = f"zset:ingredientes:grupo:{grupo_id}"
+        top_ings = redis_client.zrevrange(key_ing_zset, 0, 2, withscores=True)
+        top_3_str = "Nenhum"
+        if top_ings:
+            top_3_str = " | ".join([f"{name} ({int(score)}x)" for name, score in top_ings])
+
         return {
             "mais_frequente": most_frequent,
-            "variedade_hll": variety_count
+            "variedade_hll": variety_count,
+            "top_3_ingredientes": top_3_str
         }
     except Exception:
         return default_stats
-
