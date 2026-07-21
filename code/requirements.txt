@@ -3,3 +3,4 @@ pymongo
 pillow
 dnspython
 redis
+neo4j

@@ -9,6 +9,7 @@ from bson import ObjectId
 
 import database
 import redis_cache
+import graph_db
 
 # --- page config ---
 st.set_page_config(
@@ -341,9 +342,8 @@ if not mongo_uri:
     mongo_uri = os.environ.get("MONGO_URI", "")
 
 db = database.get_db(mongo_uri)
-
-# Inicializa Redis (fallback silencioso se indisponivel)
 redis_client = redis_cache.get_redis()
+neo4j_driver = graph_db.get_neo4j_driver()
 
 if db is None:
     st.error("❌ Não foi possível conectar ao banco de dados.")
@@ -360,6 +360,18 @@ def get_current_user():
     return None
 
 current_user = get_current_user()
+
+if current_user:
+    # Sincroniza usuário e grupo no Grafo do Neo4j
+    g_id, g_name = None, ""
+    if current_user.get("grupo_id"):
+        grp = db["grupos"].find_one({"_id": current_user["grupo_id"]})
+        if grp:
+            g_id = grp["_id"]
+            g_name = grp["nome"]
+    graph_db.sync_usuario_grupo_neo4j(neo4j_driver, current_user["_id"], current_user["nome"], g_id, g_name)
+    # Atualiza as pontuações e encerra os duelos ativos no Neo4j
+    graph_db.atualizar_duelos_ativos(neo4j_driver, db)
 
 if "tab_key" not in st.session_state:
     st.session_state["tab_key"] = "tabs_v1"
@@ -602,7 +614,7 @@ else:
     st.markdown("<h2 style='text-align:center; color:#22C55E;'>DietRats 🥗💪</h2>", unsafe_allow_html=True)
 
 # --- Navigation tabs ---
-tabs = st.tabs(["Feed Principal", "Registrar Refeição", "Ranking dos Atletas", "Notificações"], key=st.session_state["tab_key"])
+tabs = st.tabs(["Feed Principal", "Registrar Refeição", "Ranking dos Atletas", "Comunidade", "Notificações"], key=st.session_state["tab_key"])
 
 # --- TAB 1: FEED PRINCIPAL ---
 with tabs[0]:
@@ -742,6 +754,14 @@ with tabs[1]:
                             db, current_user["_id"], tipo, descricao, legenda, meal_b64, date_str, redis=redis_client
                         )
                         
+                        # Extrai e registra ingredientes no Neo4j
+                        import re
+                        stopwords = {"com", "e", "de", "do", "da", "em", "um", "uma", "para", "sem", "a", "o", "os", "as"}
+                        words = re.findall(r'\b[a-zA-ZáàâãéèêíóòôõúçÁÀÂÃÉÈÊÍÓÒÔÕÚÇ]+\b', descricao.lower())
+                        ingredientes = [w for w in words if len(w) > 2 and w not in stopwords]
+                        if ingredientes:
+                            graph_db.registrar_alimento_consumido_neo4j(neo4j_driver, current_user["_id"], ingredientes)
+                        
                         st.success(f"Refeição registrada com sucesso! Você ganhou +10 pontos. Streak atual: {new_streak} dias 🔥")
                         st.session_state["tab_key"] = f"tabs_v{datetime.datetime.now().timestamp()}"
                         st.rerun()
@@ -870,8 +890,120 @@ with tabs[2]:
         </div>
         """, unsafe_allow_html=True)
 
-# --- TAB 4: NOTIFICAÇÕES ---
+# --- TAB 4: COMUNIDADE ---
 with tabs[3]:
+    st.subheader("Comunidade DietRats 👥")
+    
+    if not neo4j_driver:
+        st.warning("O banco de grafos (Neo4j) não está conectado. Configure as credenciais para ver recomendações e duelos.")
+    else:
+        tab_com1, tab_com2, tab_com3 = st.tabs(["👥 Descobrir Parceiros", "⚔️ Duelos Ativos", "🏆 Histórico"])
+        
+        # 1. DESCOBRIR PARCEIROS
+        with tab_com1:
+            st.markdown("<p style='color:#9CA3AF;'>Pessoas fora do seu grupo com compatibilidade de dieta baseada nos ingredientes postados.</p>", unsafe_allow_html=True)
+            recoms = graph_db.obter_recomendacoes_compatibilidade(neo4j_driver, current_user["_id"])
+            
+            # Buscar duelos existentes para não recomendar quem já está em duelo pendente/ativo
+            duelos = graph_db.obter_duelos_usuario(neo4j_driver, current_user["_id"])
+            oponentes_bloqueados = {d["oponente_id"] for d in duelos["pendentes"] + duelos["ativos"]}
+            
+            if not recoms:
+                st.info("Nenhum atleta parecido encontrado ainda. Poste mais refeições listando os ingredientes para calibrar o algoritmo de similaridade!")
+            else:
+                for r in recoms:
+                    if r["id"] in oponentes_bloqueados:
+                        continue
+                    
+                    st.markdown(f"""
+                    <div style='background-color:#1C1936; border:1px solid #2A264D; padding:16px 20px; border-radius:12px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;'>
+                        <div>
+                            <strong style='font-size:1.15em; color:#F3F4F6;'>{r['nome']}</strong>
+                            <div style='font-size:0.85em; color:#A78BFA; font-weight:700; margin-top:2px;'>🌱 {r['compatibilidade']}% de compatibilidade alimentar</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Botão para Desafiar
+                    if st.button(f"Desafiar {r['nome']} ⚔️", key=f"desafiar_{r['id']}"):
+                        graph_db.criar_desafio_duelo(neo4j_driver, current_user["_id"], r["id"])
+                        st.success(f"Desafio enviado para {r['nome']}!")
+                        st.rerun()
+
+        # 2. DUELOS ATIVOS
+        with tab_com2:
+            duelos = graph_db.obter_duelos_usuario(neo4j_driver, current_user["_id"])
+            
+            # Convites Pendentes de Aceitação
+            if duelos["pendentes"]:
+                st.markdown("<strong style='color:#F59E0B;'>Convites Pendentes:</strong>", unsafe_allow_html=True)
+                for d in duelos["pendentes"]:
+                    if not d["sou_desafiante"]:
+                        st.markdown(f"**{d['oponente_nome']}** te desafiou para um duelo de consistência de 3 dias!")
+                        col_ac1, col_ac2 = st.columns(2)
+                        with col_ac1:
+                            if st.button("Aceitar 🟢", key=f"aceitar_{d['oponente_id']}"):
+                                graph_db.aceitar_desafio_duelo(neo4j_driver, current_user["_id"], d["oponente_id"])
+                                st.rerun()
+                        with col_ac2:
+                            if st.button("Recusar 🔴", key=f"recusar_{d['oponente_id']}"):
+                                graph_db.recusar_desafio_duelo(neo4j_driver, current_user["_id"], d["oponente_id"])
+                                st.rerun()
+                    else:
+                        st.markdown(f"⏳ Desafio enviado para **{d['oponente_nome']}** (Aguardando resposta...)")
+                st.markdown("<hr style='border-color:#2A264D;'>", unsafe_allow_html=True)
+
+            # Duelos Ativos
+            if not duelos["ativos"]:
+                st.info("Nenhum duelo ativo no momento. Desafie alguém na aba ao lado!")
+            else:
+                st.markdown("<strong style='color:#22C55E;'>Em Andamento (Duelo de 3 dias):</strong>", unsafe_allow_html=True)
+                for d in duelos["ativos"]:
+                    # Calcula progresso ou prazo
+                    st.markdown(f"""
+                    <div style='background-color:#110E26; border:1px solid #6D28D9; border-left:6px solid #6D28D9; padding:16px 20px; border-radius:12px; margin-bottom:12px;'>
+                        <div style='display:flex; justify-content:space-between; margin-bottom:6px;'>
+                            <span style='font-weight:700; color:#F3F4F6;'>Você vs {d['oponente_nome']} ⚔️</span>
+                            <span style='font-size:0.85em; color:#9CA3AF;'>Termina em: {d['data_fim']}</span>
+                        </div>
+                        <div style='display:flex; justify-content:space-between; align-items:center; margin-top:8px;'>
+                            <span style='font-size:1.1em; color:#22C55E; font-weight:800;'>Seus Pontos: {d['pontos_meus']} Pts</span>
+                            <span style='font-size:1.1em; color:#EF4444; font-weight:800;'>Oponente: {d['pontos_deles']} Pts</span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        # 3. HISTÓRICO
+        with tab_com3:
+            duelos = graph_db.obter_duelos_usuario(neo4j_driver, current_user["_id"])
+            if not duelos["concluidos"]:
+                st.info("Nenhum duelo concluído no histórico.")
+            else:
+                for d in duelos["concluidos"]:
+                    # Determina resultado
+                    vencedor_id = d["vencedor"]
+                    if vencedor_id == "Empate":
+                        resultado = "🤝 Empate!"
+                        color = "#9CA3AF"
+                    elif vencedor_id == str(current_user["_id"]):
+                        resultado = "🏆 Você Venceu!"
+                        color = "#22C55E"
+                    else:
+                        resultado = "💀 Você Perdeu!"
+                        color = "#EF4444"
+
+                    st.markdown(f"""
+                    <div style='background-color:#1C1936; border:1px solid #2A264D; padding:14px 18px; border-radius:10px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;'>
+                        <div>
+                            <strong>Duelo contra {d['oponente_nome']}</strong>
+                            <div style='font-size:0.85em; color:#9CA3AF;'>Placar: {d['pontos_meus']} vs {d['pontos_deles']}</div>
+                        </div>
+                        <span style='color:{color}; font-weight:800; font-size:1.05em;'>{resultado}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+# --- TAB 5: NOTIFICAÇÕES ---
+with tabs[4]:
     st.subheader("Suas Notificações 🔔")
 
     notifications = database.get_notifications(db, current_user["_id"])
