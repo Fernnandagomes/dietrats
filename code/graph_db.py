@@ -210,7 +210,7 @@ def obter_duelos_usuario(driver, usuario_id):
 
 def atualizar_duelos_ativos(driver, db):
     """Atualiza a pontuação e encerra duelos vencidos com base nas refeições do MongoDB."""
-    if not driver or not db:
+    if driver is None or db is None:
         return
     from bson import ObjectId
     query_ativos = """
