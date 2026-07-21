@@ -357,16 +357,7 @@ if "user_id" not in st.session_state:
 
 def get_current_user():
     if st.session_state["user_id"]:
-        uid = st.session_state["user_id"]
-        # Tenta Redis primeiro (evita query ao MongoDB em todo rerun)
-        cached = cache.get_usuario_cache(redis_client, uid)
-        if cached:
-            return cached
-        # Cache miss — busca no MongoDB e guarda no Redis
-        user = db["usuarios"].find_one({"_id": ObjectId(uid)})
-        if user:
-            cache.cache_usuario(redis_client, user)
-        return user
+        return db["usuarios"].find_one({"_id": ObjectId(st.session_state["user_id"])})
     return None
 
 current_user = get_current_user()
@@ -396,7 +387,6 @@ if not current_user:
                 user = database.authenticate_user(db, email, senha)
                 if user:
                     st.session_state["user_id"] = str(user["_id"])
-                    cache.cache_usuario(redis_client, user)  # salva no Redis
                     st.success(f"Bem-vindo, {user['nome']}!")
                     st.rerun()
                 else:
@@ -505,6 +495,7 @@ else:
 st.sidebar.markdown(f"<h3 style='margin:0; color:#F3F4F6;'>{current_user['nome']}</h3>", unsafe_allow_html=True)
 st.sidebar.markdown(f"<p style='margin:4px 0 0 0; color:#9CA3AF; font-size:0.9em;'>🔥 {current_user.get('streak_atual', 0)} dias de Streak</p>", unsafe_allow_html=True)
 st.sidebar.markdown(f"<p style='margin:2px 0 0 0; color:#22C55E; font-weight:700; font-size:1.05em;'>🏆 {current_user.get('pontos_consistencia', 0)} Pts</p>", unsafe_allow_html=True)
+
 st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
 # Display group info
@@ -551,8 +542,6 @@ with st.sidebar.expander("⚙️ Editar Perfil"):
                 database.update_user(
                     db, current_user["_id"], new_nome, new_email, new_senha, new_avatar, p_b64
                 )
-                # Invalida cache do usuario — proximo rerun busca dados frescos
-                cache.invalidar_usuario(redis_client, str(current_user["_id"]))
                 st.success("Perfil atualizado!")
                 st.rerun()
             except Exception as e:
@@ -566,7 +555,6 @@ if not user_group:
             if st.button("Entrar no Grupo"):
                 try:
                     grp = database.join_group(db, current_user["_id"], code)
-                    cache.invalidar_usuario(redis_client, str(current_user["_id"]))  # força busca fresca
                     st.success(f"Você entrou no grupo {grp['nome']}!")
                     st.rerun()
                 except Exception as e:
@@ -594,7 +582,6 @@ if not user_group:
                             {"_id": current_user["_id"]},
                             {"$set": {"grupo_id": g_id}}
                         )
-                        cache.invalidar_usuario(redis_client, str(current_user["_id"]))  # força busca fresca
                         st.success(f"Grupo {g_n} criado com sucesso!")
                         st.rerun()
                     except Exception as e:
@@ -602,7 +589,6 @@ if not user_group:
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 if st.sidebar.button("Log Out", use_container_width=True):
-    cache.invalidar_usuario(redis_client, str(st.session_state["user_id"]))  # limpa cache
     st.session_state["user_id"] = None
     st.rerun()
 
@@ -733,7 +719,7 @@ with tabs[1]:
     else:
         with st.form("meal_register_form_new"):
             tipo = st.selectbox("Tipo de Refeição", ["Café", "Almoço", "Jantar"])
-            descricao = st.text_area("O que você comeu? (Ingredientes/Descrição)*")
+            descricao = st.text_area("Ingredientes / Alimentos da refeição (ex: Frango, Arroz, Batata doce, Salada)*")
             legenda = st.text_input("Legenda para a postagem (Opcional)")
             data_refeicao = st.date_input("Data da Refeição", value=datetime.date.today())
             uploaded_file = st.file_uploader("Foto do seu prato (Obrigatória)*", type=["jpg", "jpeg", "png"])
@@ -754,7 +740,7 @@ with tabs[1]:
                         date_str = data_refeicao.strftime("%Y-%m-%d")
                         
                         new_streak = database.add_meal(
-                            db, current_user["_id"], tipo, descricao, legenda, meal_b64, date_str
+                            db, current_user["_id"], tipo, descricao, legenda, meal_b64, date_str, redis=redis_client
                         )
                         
                         st.success(f"Refeição registrada com sucesso! Você ganhou +10 pontos. Streak atual: {new_streak} dias 🔥")
@@ -770,6 +756,24 @@ with tabs[2]:
     if not user_group:
         st.info("Entre ou crie um grupo na barra lateral para ver o ranking dos atletas.")
     else:
+        # Busca Estatísticas do Grupo calculadas no Redis (ZSET + HyperLogLog)
+        stats_redis = cache.get_estatisticas_refeicoes_grupo(redis_client, user_group["_id"])
+        
+        st.markdown(f"""
+        <div style='background: linear-gradient(135deg, #1C1936 0%, #2A264D 100%);
+                    border: 1px solid #6D28D9; border-radius: 14px; padding: 16px 20px;
+                    margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;'>
+            <div>
+                <div style='font-size:0.82em; color:#9CA3AF; text-transform:uppercase; font-weight:700;'>🍽️ Refeição Mais Frequente (Redis ZSET)</div>
+                <div style='font-size:1.15em; color:#22C55E; font-weight:800; margin-top:2px;'>{stats_redis['mais_frequente']}</div>
+            </div>
+            <div style='text-align:right;'>
+                <div style='font-size:0.82em; color:#9CA3AF; text-transform:uppercase; font-weight:700;'>🥗 Alimentos Únicos (Redis HLL)</div>
+                <div style='font-size:1.15em; color:#A78BFA; font-weight:800; margin-top:2px;'>~{stats_redis['variedade_hll']} alimentos diferentes</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
         ranking_users = database.get_ranking(db, user_group["_id"])
 
         for pos, u in enumerate(ranking_users, 1):

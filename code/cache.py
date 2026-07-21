@@ -1,29 +1,22 @@
-"""
-cache.py
-========
-Camada de cache usando Redis Cloud (redis-py).
-Implementa o padrao Cache-Aside para as aggregations do DietRats.
-
-Se o Redis estiver indisponivel, o app continua funcionando
-normalmente buscando direto no MongoDB (fallback silencioso).
-"""
-
 import json
+import re
 import redis as redis_lib
 import streamlit as st
 
+STOPWORDS = {"com", "e", "de", "do", "da", "em", "um", "uma", "para", "sem", "a", "o", "os", "as"}
+
 
 def get_redis():
-    """
-    Conecta ao Redis Cloud usando credenciais do st.secrets.
-    Retorna None silenciosamente se Redis estiver indisponivel.
-    """
+    """Conecta ao Redis Cloud utilizando as credenciais salvas em st.secrets."""
     try:
-        host     = st.secrets["REDIS_HOST"]
-        port     = int(st.secrets["REDIS_PORT"])
-        password = st.secrets["REDIS_PASSWORD"]
+        host = st.secrets.get("REDIS_HOST")
+        port = int(st.secrets.get("REDIS_PORT", 6379))
+        password = st.secrets.get("REDIS_PASSWORD")
 
-        r = redis_lib.Redis(
+        if not host or not password:
+            return None
+
+        client = redis_lib.Redis(
             host=host,
             port=port,
             password=password,
@@ -31,105 +24,109 @@ def get_redis():
             socket_connect_timeout=2,
             socket_timeout=2,
         )
-        r.ping()
-        return r
+        client.ping()
+        return client
     except Exception:
         return None
 
 
-def get_cached(r, key, ttl_segundos, fn_busca):
-    """
-    Padrao Cache-Aside generico.
-
-    Parametros:
-      r             -- conexao Redis (pode ser None)
-      key           -- chave unica no Redis (ex: "feed:grupo:abc123")
-      ttl_segundos  -- tempo de vida do cache
-      fn_busca      -- funcao que busca dados reais no MongoDB (so chamada em cache miss)
-    """
-    if r:
+def get_cached(redis_client, key, ttl_seconds, fetch_fn):
+    """Padrão Cache-Aside genérico para dados serializáveis em JSON."""
+    if redis_client:
         try:
-            cached_val = r.get(key)
-            if cached_val:
-                return json.loads(cached_val)  # Cache HIT
+            val = redis_client.get(key)
+            if val:
+                return json.loads(val)
         except Exception:
             pass
 
-    # Cache MISS -- busca no MongoDB
-    resultado = fn_busca()
+    data = fetch_fn()
 
-    if r and resultado:
+    if redis_client and data:
         try:
-            r.set(key, json.dumps(resultado, default=str), ex=ttl_segundos)
+            redis_client.set(key, json.dumps(data, default=str), ex=ttl_seconds)
         except Exception:
             pass
 
-    return resultado
+    return data
 
 
-def invalidar(r, key):
-    """Apaga uma chave do cache (chamado apos mudanca de dados)."""
-    if r:
+def invalidar(redis_client, key):
+    """Remove uma chave específica do cache."""
+    if redis_client:
         try:
-            r.delete(key)
+            redis_client.delete(key)
         except Exception:
             pass
 
 
-def invalidar_feed_grupo(r, grupo_id):
-    """Atalho para invalidar o cache do feed de um grupo especifico."""
-    invalidar(r, f"feed:grupo:{grupo_id}")
-
-
-def invalidar_hall(r):
-    """Atalho para invalidar o cache do Hall da Fama."""
-    invalidar(r, "hall_da_fama")
-
-
-# ── Cache de Sessão de Usuário ────────────────────────────────────────────────
-
-def cache_usuario(r, user):
-    """
-    Salva os dados do usuario no Redis apos o login.
-    TTL: 30 minutos. Nao armazena foto_url (grande) nem senha.
-    Chave: user:{user_id}
-    """
-    if not r or not user:
+def atualizar_pontos_zset(redis_client, grupo_id, usuario_nome, pontos):
+    """Atualiza a pontuação do usuário no ZSET do grupo."""
+    if not redis_client or not grupo_id or not usuario_nome:
         return
     try:
-        user_id = str(user["_id"])
-        payload = {
-            "_id":                    user_id,
-            "nome":                   user.get("nome", ""),
-            "email":                  user.get("email", ""),
-            "avatar":                 user.get("avatar", "💪"),
-            "pontos_consistencia":    user.get("pontos_consistencia", 0),
-            "streak_atual":           user.get("streak_atual", 0),
-            "grupo_id":               str(user["grupo_id"]) if user.get("grupo_id") else None,
-            "ultimo_acesso_notificacoes": str(user["ultimo_acesso_notificacoes"]) if user.get("ultimo_acesso_notificacoes") else None,
-        }
-        r.set(f"user:{user_id}", json.dumps(payload), ex=1800)  # 30 minutos
+        key = f"ranking:grupo:{grupo_id}"
+        redis_client.zadd(key, {usuario_nome: float(pontos)})
+        redis_client.expire(key, 604800)
     except Exception:
         pass
 
 
-def get_usuario_cache(r, user_id):
-    """
-    Tenta buscar os dados do usuario no Redis.
-    Retorna dict com os dados ou None se nao encontrado.
-    """
-    if not r:
+def get_ranking_zset(redis_client, grupo_id):
+    """Retorna o ranking do grupo ordenado por pontuação a partir do ZSET."""
+    if not redis_client or not grupo_id:
         return None
     try:
-        val = r.get(f"user:{user_id}")
-        return json.loads(val) if val else None
+        key = f"ranking:grupo:{grupo_id}"
+        result = redis_client.zrevrange(key, 0, -1, withscores=True)
+        if result:
+            return [{"nome": name, "pontos_consistencia": int(score)} for name, score in result]
     except Exception:
-        return None
+        pass
+    return None
 
 
-def invalidar_usuario(r, user_id):
-    """
-    Apaga o cache do usuario (chamado ao atualizar perfil ou fazer logout).
-    Proxima chamada vai buscar dados frescos do MongoDB.
-    """
-    invalidar(r, f"user:{user_id}")
+def registrar_tipo_refeicao(redis_client, grupo_id, tipo_refeicao, descricao):
+    """Registra frequência de tipo de refeição (ZSET) e ingredientes únicos (HyperLogLog)."""
+    if not redis_client or not grupo_id or not tipo_refeicao:
+        return
+    try:
+        key_freq = f"freq:refeicoes:grupo:{grupo_id}"
+        redis_client.zincrby(key_freq, 1, tipo_refeicao)
+        redis_client.expire(key_freq, 2592000)
+
+        if descricao:
+            key_hll = f"hll:variedade:grupo:{grupo_id}"
+            words = re.findall(r'\b[a-zA-ZáàâãéèêíóòôõúçÁÀÂÃÉÈÊÍÓÒÔÕÚÇ]+\b', descricao.lower())
+            ingredients = [w for w in words if len(w) > 2 and w not in STOPWORDS]
+            if ingredients:
+                redis_client.pfadd(key_hll, *ingredients)
+                redis_client.expire(key_hll, 2592000)
+    except Exception:
+        pass
+
+
+def get_estatisticas_refeicoes_grupo(redis_client, grupo_id):
+    """Retorna o tipo de refeição mais frequente (ZSET) e estimativa de ingredientes únicos (HLL)."""
+    default_stats = {"mais_frequente": "Nenhum registro", "variedade_hll": 0}
+    if not redis_client or not grupo_id:
+        return default_stats
+    try:
+        key_freq = f"freq:refeicoes:grupo:{grupo_id}"
+        top_meal = redis_client.zrevrange(key_freq, 0, 0, withscores=True)
+
+        most_frequent = "Nenhum registro"
+        if top_meal:
+            name, count = top_meal[0]
+            most_frequent = f"{name} ({int(count)}x)"
+
+        key_hll = f"hll:variedade:grupo:{grupo_id}"
+        variety_count = redis_client.pfcount(key_hll)
+
+        return {
+            "mais_frequente": most_frequent,
+            "variedade_hll": variety_count
+        }
+    except Exception:
+        return default_stats
+

@@ -1,20 +1,38 @@
-﻿# 🗄️ DietRats — Documentação do Banco de Dados (MongoDB)
+# 🗄️ DietRats — Documentação do Banco de Dados (MongoDB + Redis)
 
-O banco de dados do DietRats é **não relacional (NoSQL)**, hospedado no **MongoDB Atlas**.
-O nome do banco é `dietrats` e ele contém **6 coleções (collections)**.
+O banco de dados do DietRats é **não relacional (NoSQL)**, combinando a persistência no **MongoDB Atlas** com o desempenho e estruturas avançadas em memória no **Redis Cloud**.
 
 ---
 
-## 📁 Visão Geral das Coleções
+## 🍃 MongoDB Atlas (Armazenamento Principal)
+
+O banco de dados principal é o `dietrats` no MongoDB Atlas, utilizando o padrão **Embedded Schema (Documentos Embutidos)**.
+
+### Coleções Principais (3 Coleções)
 
 | Coleção | Descrição |
 |---|---|
 | `usuarios` | Perfis dos atletas cadastrados |
 | `grupos` | Grupos de desafio entre amigos |
-| `registrosdiarios` | Refeições postadas pelos usuários |
-| `reacoes` | Reações de emoji em postagens |
-| `comentarios` | Comentários em postagens |
-| `notificacoes` | Alertas e notificações do sistema |
+| `registrosdiarios` | Refeições postadas com `reacoes[]` e `comentarios[]` embutidos |
+
+---
+
+## 🔴 Redis Cloud (Cache, Estruturas Comuns e Probabilísticas)
+
+O Redis é utilizado em memória RAM para otimização de performance e estatísticas em tempo real:
+
+### 1. Estruturas Comuns (Data Structures)
+* **STRING (Cache)**:
+  - `hall_da_fama`: Guarda em cache por 10 minutos a resposta da agregação global do Top 5 Atletas.
+* **ZSET (Sorted Set - Ranking e Frequência)**:
+  - `ranking:grupo:<grupo_id>`: Mantém a pontuação em tempo real dos atletas (`ZADD` / `ZREVRANGE`).
+  - `freq:refeicoes:grupo:<grupo_id>`: Incrementa a frequência dos tipos de refeição (`ZINCRBY`) para descobrir qual tipo é mais frequente no grupo (Café, Almoço, Jantar, etc).
+
+### 2. Estrutura Probabilística (Probabilistic)
+* **HyperLogLog (HLL)**:
+  - `hll:variedade:grupo:<grupo_id>`: Utiliza o comando `PFADD` e `PFCOUNT` para estimar a **quantidade de pratos/descrições de refeições únicas** registradas no grupo, gastando apenas ~12KB fixos de memória RAM.
+
 
 ---
 
