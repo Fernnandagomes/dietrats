@@ -19,21 +19,19 @@ from bson import ObjectId
 
 
 # PIPELINE 1 - Feed do Grupo com Interacoes Embutidas
+# Nota: Feed nao usa cache Redis pois contem fotos base64 grandes.
+# O cache Redis e usado apenas para dados leves (Hall da Fama).
 
 def get_feed_com_interacoes(db, grupo_id, redis=None):
     """
     Retorna os registros diarios do grupo enriquecidos com dados do autor.
-    Usa Redis como cache por 30 segundos por grupo (cache miss -> MongoDB).
+    Nao usa cache Redis pois o payload com fotos base64 e muito grande.
     """
-    key = f"feed:grupo:{grupo_id}"
-    return cache.get_cached(
-        redis, key, ttl_segundos=30,
-        fn_busca=lambda: _query_feed(db, grupo_id)
-    )
+    return _query_feed(db, grupo_id)
 
 
 def _query_feed(db, grupo_id):
-    """Query MongoDB diretamente — chamada apenas em cache miss."""
+    """Query MongoDB diretamente."""
     group_user_ids = [
         u["_id"]
         for u in db["usuarios"].find({"grupo_id": ObjectId(grupo_id)}, {"_id": 1})
@@ -53,15 +51,16 @@ def _query_feed(db, grupo_id):
         }},
         {"$unwind": "$autor"},
         {"$project": {
-            "usuario_id":   1,
-            "tipo":         1,
-            "descricao":    1,
-            "legenda":      1,
-            "foto_url":     1,
-            "data":         1,
-            "data_criacao": 1,
-            "reacoes":      1,
-            "comentarios":  1,
+            "usuario_id":     1,
+            "tipo":           1,
+            "descricao":      1,
+            "legenda":        1,
+            "foto_url":       1,
+            "data":           1,
+            "data_criacao":   1,
+            "reacoes":        1,
+            "comentarios":    1,
+            "autor._id":      1,
             "autor.nome":     1,
             "autor.avatar":   1,
             "autor.foto_url": 1,

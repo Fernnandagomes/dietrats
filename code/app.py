@@ -357,7 +357,16 @@ if "user_id" not in st.session_state:
 
 def get_current_user():
     if st.session_state["user_id"]:
-        return db["usuarios"].find_one({"_id": ObjectId(st.session_state["user_id"])})
+        uid = st.session_state["user_id"]
+        # Tenta Redis primeiro (evita query ao MongoDB em todo rerun)
+        cached = cache.get_usuario_cache(redis_client, uid)
+        if cached:
+            return cached
+        # Cache miss — busca no MongoDB e guarda no Redis
+        user = db["usuarios"].find_one({"_id": ObjectId(uid)})
+        if user:
+            cache.cache_usuario(redis_client, user)
+        return user
     return None
 
 current_user = get_current_user()
@@ -387,6 +396,7 @@ if not current_user:
                 user = database.authenticate_user(db, email, senha)
                 if user:
                     st.session_state["user_id"] = str(user["_id"])
+                    cache.cache_usuario(redis_client, user)  # salva no Redis
                     st.success(f"Bem-vindo, {user['nome']}!")
                     st.rerun()
                 else:
@@ -541,6 +551,8 @@ with st.sidebar.expander("⚙️ Editar Perfil"):
                 database.update_user(
                     db, current_user["_id"], new_nome, new_email, new_senha, new_avatar, p_b64
                 )
+                # Invalida cache do usuario — proximo rerun busca dados frescos
+                cache.invalidar_usuario(redis_client, str(current_user["_id"]))
                 st.success("Perfil atualizado!")
                 st.rerun()
             except Exception as e:
@@ -588,6 +600,7 @@ if not user_group:
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 if st.sidebar.button("Log Out", use_container_width=True):
+    cache.invalidar_usuario(redis_client, str(st.session_state["user_id"]))  # limpa cache
     st.session_state["user_id"] = None
     st.rerun()
 
@@ -615,11 +628,12 @@ with tabs[0]:
             st.info("Ainda não há postagens neste grupo. Registre sua primeira refeição para começar!")
             
         for idx, meal in enumerate(meals):
-            meal_user = db["usuarios"].find_one({"_id": meal["usuario_id"]})
+            # Usa dados do autor ja embutidos pela aggregation (sem query extra)
+            meal_user = meal.get("autor", {})
             if not meal_user:
                 continue
-            
-            # Header Avatar details
+
+            # Header Avatar
             avatar_html = ""
             if meal_user.get("foto_url"):
                 avatar_html = f"<img class='user-avatar-img' src='data:image/png;base64,{meal_user['foto_url']}'>"
@@ -680,10 +694,15 @@ with tabs[0]:
                     st.markdown("<div style='background-color:#110E26; padding:12px 18px; border-radius:10px; margin-top:14px; border:1px solid #2A264D;'>", unsafe_allow_html=True)
                     st.markdown("<strong style='font-size:0.9em; color:#22C55E;'>Comentários:</strong>", unsafe_allow_html=True)
                     for c in comments_list:
-                        c_nome   = c.get("nome", "Atleta")
+                        c_nome = c.get("nome", "Atleta")
                         c_avatar = ""
-                        # Busca avatar apenas para renderização — dado já existe no comentário
-                        c_user = db["usuarios"].find_one({"_id": c["usuario_id"]}, {"avatar": 1, "foto_url": 1})
+                        # Converte usuario_id para ObjectId para buscar no banco
+                        try:
+                            from bson import ObjectId
+                            c_uid = c["usuario_id"] if isinstance(c["usuario_id"], ObjectId) else ObjectId(str(c["usuario_id"]))
+                            c_user = db["usuarios"].find_one({"_id": c_uid}, {"avatar": 1, "foto_url": 1})
+                        except Exception:
+                            c_user = None
                         if c_user and c_user.get("foto_url"):
                             c_avatar = f"<img style='width:24px; height:24px; border-radius:50%; object-fit:cover; display:inline-block; vertical-align:middle; margin-right:6px;' src='data:image/png;base64,{c_user['foto_url']}'>"
                         elif c_user:
@@ -737,7 +756,6 @@ with tabs[1]:
                         )
                         
                         st.success(f"Refeição registrada com sucesso! Você ganhou +10 pontos. Streak atual: {new_streak} dias 🔥")
-                        cache.invalidar_feed_grupo(redis_client, user_group["_id"])
                         st.session_state["tab_key"] = f"tabs_v{datetime.datetime.now().timestamp()}"
                         st.rerun()
                     except Exception as e:
