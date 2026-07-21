@@ -784,15 +784,15 @@ with tabs[2]:
                     margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;'>
             <div style='min-width: 150px; margin: 8px 0;'>
                 <div style='font-size:0.82em; color:#9CA3AF; text-transform:uppercase; font-weight:700;'>🍽️ Mais Frequente (ZSET)</div>
-                <div style='font-size:1.15em; color:#22C55E; font-weight:800; margin-top:2px;'>{stats_redis['mais_frequente']}</div>
+                <div style='font-size:1.15em; color:#22C55E; font-weight:800; margin-top:2px;'>{stats_redis.get('mais_frequente', 'Nenhum')}</div>
             </div>
             <div style='min-width: 250px; text-align: center; margin: 8px 0;'>
                 <div style='font-size:0.82em; color:#9CA3AF; text-transform:uppercase; font-weight:700;'>🏆 Top 3 Alimentos do Grupo (ZSET)</div>
-                <div style='font-size:1.05em; color:#F59E0B; font-weight:800; margin-top:2px;'>{stats_redis['top_3_ingredientes']}</div>
+                <div style='font-size:1.05em; color:#F59E0B; font-weight:800; margin-top:2px;'>{stats_redis.get('top_3_ingredientes', 'Nenhum')}</div>
             </div>
             <div style='min-width: 150px; text-align:right; margin: 8px 0;'>
                 <div style='font-size:0.82em; color:#9CA3AF; text-transform:uppercase; font-weight:700;'>🥗 Alimentos Únicos (HLL)</div>
-                <div style='font-size:1.15em; color:#A78BFA; font-weight:800; margin-top:2px;'>~{stats_redis['variedade_hll']} diferentes</div>
+                <div style='font-size:1.15em; color:#A78BFA; font-weight:800; margin-top:2px;'>~{stats_redis.get('variedade_hll', 0)} diferentes</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
