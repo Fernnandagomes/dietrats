@@ -566,6 +566,7 @@ if not user_group:
             if st.button("Entrar no Grupo"):
                 try:
                     grp = database.join_group(db, current_user["_id"], code)
+                    cache.invalidar_usuario(redis_client, str(current_user["_id"]))  # força busca fresca
                     st.success(f"Você entrou no grupo {grp['nome']}!")
                     st.rerun()
                 except Exception as e:
@@ -593,6 +594,7 @@ if not user_group:
                             {"_id": current_user["_id"]},
                             {"$set": {"grupo_id": g_id}}
                         )
+                        cache.invalidar_usuario(redis_client, str(current_user["_id"]))  # força busca fresca
                         st.success(f"Grupo {g_n} criado com sucesso!")
                         st.rerun()
                     except Exception as e:
